@@ -1,2 +1,3 @@
 # PostIBL
-The post-effect of image-based lighting for MikuMikuEffect and MikuMikuMoving.
+
+The post-effect of image-based lighting for MikuMikuEffect and MikuMikuMoving. (incomplete)
