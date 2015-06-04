@@ -15,6 +15,9 @@
 /// 物理ベースマテリアルマップテクスチャのフォーマット。
 #define POSTIBL_MATERIAL_RT_FORMAT "A16B16G16R16F"
 
+/// アルベドマップテクスチャのフォーマット。
+#define POSTIBL_ALBEDO_RT_FORMAT "A8R8G8B8"
+
 /// 位置マップテクスチャのフォーマット。
 #define POSTIBL_POSITION_RT_FORMAT "A16B16G16R16F"
 
@@ -131,7 +134,6 @@ sampler2D MaterialSampler =
         AddressV = CLAMP;
     };
 
-#if 0
 /// アルベドマップテクスチャ。
 texture2D IBL_Albedo : OFFSCREENRENDERTARGET <
     string Description = "Albedo map for PostIBL";
@@ -155,7 +157,6 @@ sampler2D AlbedoSampler =
         AddressU = CLAMP;
         AddressV = CLAMP;
     };
-#endif // 0
 
 /// 位置マップテクスチャ。
 texture2D IBL_Position : OFFSCREENRENDERTARGET <
@@ -282,15 +283,14 @@ float4 RunPS(float2 tex : TEXCOORD0) : COLOR
     float rough = pbm.y;
     float specular = pbm.z;
 
-    // 位置、法線、深度を取得
+    // アルベド、位置、法線、深度を取得
+    float4 albedo = tex2D(AlbedoSampler, tex);
     float3 pos = tex2D(PositionSampler, tex).xyz;
     float3 normal = tex2D(NormalSampler, tex).xyz;
     float depth = tex2D(DepthSampler, tex).r;
 
-    /// @todo ひとまず metal なら法線を加算してみる
-    float4 color = orgColor + float4(normal, 0) * metal;
-
-    color = lerp(orgColor, color, pbm.a);
+    /// @todo ひとまずアルベドを表示してみる。
+    float4 color = lerp(orgColor, albedo, pbm.a);
 
     return color;
 }

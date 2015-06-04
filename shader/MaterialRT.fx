@@ -42,13 +42,13 @@
 /// ワールドビュープロジェクションマトリクス。
 float4x4 WorldViewProjMatrix : WORLDVIEWPROJECTION;
 
-/// ワールドマトリクス。
-float4x4 WorldMatrix : WORLD;
-
 #ifdef MIKUMIKUMOVING
 
 /// ワールドビューマトリクス。
 float4x4 WorldViewMatrix : WORLDVIEW;
+
+/// ワールドマトリクス。
+float4x4 WorldMatrix : WORLD;
 
 /// プロジェクションマトリクス。
 float4x4 ProjMatrix : PROJECTION;
