@@ -3,7 +3,7 @@
 /// @author ルーチェ
 
 // 環境マップ関連定義
-#include "shader/envmap_def.h"
+#include "shader/EnvMapCommon.h"
 
 ////////////////////
 // 設定ここから
@@ -11,6 +11,12 @@
 
 /// 通常描画結果記録用テクスチャのフォーマット。
 #define POSTIBL_ORGCOLOR_RT_FORMAT "A16B16G16R16F"
+
+/// 環境マップテクスチャの縦横幅。 512 または 1024 。
+#define POSTIBL_ENVMAP_RT_SIZE 1024
+
+/// 環境マップテクスチャのフォーマット。
+#define POSTIBL_ENVCOLOR_RT_FORMAT "A16B16G16R16F"
 
 /// 物理ベースマテリアルマップテクスチャのフォーマット。
 #define POSTIBL_MATERIAL_RT_FORMAT "A16B16G16R16F"
@@ -61,32 +67,35 @@ sampler2D OrgColorRTSampler =
         AddressV = CLAMP;
     };
 
-#if 0
-/// 環境マップテクスチャ。
-texture2D EnvMapRT : OFFSCREENRENDERTARGET <
-    string Description = "Environment map for PostIBL";
-    int Width = (POSTIBL_ENVMAP_FACE_SIZE) * 4;
-    int Height = (POSTIBL_ENVMAP_FACE_SIZE) * 2;
+/// 環境カラーマップテクスチャ。
+texture2D IBL_EnvColor : OFFSCREENRENDERTARGET <
+    string Description = "Environment color map for PostIBL";
+    int Width = (POSTIBL_ENVMAP_RT_SIZE);
+    int Height = (POSTIBL_ENVMAP_RT_SIZE);
     float4 ClearColor = { 0, 0, 0, 0 };
     float ClearDepth = 1;
-    string Format = POSTIBL_ENVMAP_TEX_FORMAT;
+    string Format = POSTIBL_ENVCOLOR_RT_FORMAT;
     int MipLevels = 1;
     string DefaultEffect =
         "self=hide;"
-        "*=shader/EnvMapRT.fx"; >;
+#ifdef MIKUMIKUMOVING
+        "*=shader/EnvMapRT_MMM.fx";
+#else // MIKUMIKUMOVING
+        "*=shader/EnvMapRT_MME.fx";
+#endif // MIKUMIKUMOVING
+    >;
 
-/// 環境マップテクスチャのサンプラ。
-sampler2D EnvMapRTSampler =
+/// 環境カラーマップテクスチャのサンプラ。
+sampler2D EnvColorSampler =
     sampler_state
     {
-        Texture = <EnvMapRT>;
+        Texture = <IBL_EnvColor>;
         MinFilter = LINEAR;
         MagFilter = LINEAR;
         MipFilter = LINEAR;
         AddressU = WRAP;
         AddressV = CLAMP;
     };
-#endif // 0
 
 /// 物理ベースマテリアルマップテクスチャ。
 texture2D IBL_Material : OFFSCREENRENDERTARGET <
@@ -210,7 +219,7 @@ sampler2D NormalSampler =
 texture2D IBL_Depth : OFFSCREENRENDERTARGET <
     string Description = "Depth map for PostIBL";
     float2 ViewPortRatio = { 1, 1 };
-    float4 ClearColor = { 0, 0, 0, 0 };
+    float4 ClearColor = { 1, 1, 1, 0 };
     float ClearDepth = 1;
     string Format = POSTIBL_DEPTH_RT_FORMAT;
     int MipLevels = 1;
@@ -269,6 +278,11 @@ VSOutput RunVS(float4 pos : POSITION, float2 tex : TEXCOORD0)
 /// ピクセルシェーダ処理を行う。
 float4 RunPS(float2 tex : TEXCOORD0) : COLOR
 {
+#if 0
+    // 環境マップを表示してみる。
+    return tex2D(EnvColorSampler, tex);
+#endif
+
     // 元の色を取得
     float4 orgColor = tex2D(OrgColorRTSampler, tex);
 

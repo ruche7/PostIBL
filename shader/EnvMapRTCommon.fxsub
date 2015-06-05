@@ -1,0 +1,216 @@
+/// @file
+/// @brief キューブ環境マップレンダリング用の共通処理。
+/// @author ルーチェ
+///
+/// EnvMapRT_*.fx の冒頭で include される前提で記述されている。
+
+#include "EnvMapCommon.h"
+
+/// カメラ位置。(＝環境マップの中心点)
+float3 CameraPosition : CONTROLOBJECT < string name = "(OffscreenOwner)"; >;
+
+/// ワールドマトリクス。
+float4x4 WorldMatrix : WORLD;
+
+/// プロジェクションマトリクス。
+static float4x4 ProjMatrix = EnvMapFaceProjMatrix;
+
+/// キューブ面ごとのビューマトリクス。
+static float4x4 EnvMapFaceViewMatrices[6] =
+    {
+        MakeEnvMapFaceViewMatrix(CameraPosition, 0),
+        MakeEnvMapFaceViewMatrix(CameraPosition, 1),
+        MakeEnvMapFaceViewMatrix(CameraPosition, 2),
+        MakeEnvMapFaceViewMatrix(CameraPosition, 3),
+        MakeEnvMapFaceViewMatrix(CameraPosition, 4),
+        MakeEnvMapFaceViewMatrix(CameraPosition, 5),
+    };
+
+/// キューブ面ごとのワールドビュープロジェクションマトリクス。
+static float4x4 EnvMapFaceWVPMatrices[6] =
+    {
+        mul(mul(WorldMatrix, EnvMapFaceViewMatrices[0]), EnvMapFaceProjMatrix),
+        mul(mul(WorldMatrix, EnvMapFaceViewMatrices[1]), EnvMapFaceProjMatrix),
+        mul(mul(WorldMatrix, EnvMapFaceViewMatrices[2]), EnvMapFaceProjMatrix),
+        mul(mul(WorldMatrix, EnvMapFaceViewMatrices[3]), EnvMapFaceProjMatrix),
+        mul(mul(WorldMatrix, EnvMapFaceViewMatrices[4]), EnvMapFaceProjMatrix),
+        mul(mul(WorldMatrix, EnvMapFaceViewMatrices[5]), EnvMapFaceProjMatrix),
+    };
+
+/// キューブの各面レンダリング位置へのスケーリングマトリクス。
+float4x4 EnvMapFaceScaleMatrix =
+    {
+        { 0.25f,        0, 0, 0 },
+        {     0, 1.0f / 3, 0, 0 },
+        {     0,        0, 1, 0 },
+        {     0,        0, 0, 1 },
+    };
+
+/// キューブの各面レンダリング位置への X, Y 並行移動量。
+float2 EnvMapFaceTranslates[6] =
+    {
+        { +0.25f,         0 },
+        { -0.75f,         0 },
+        { -0.25f, +2.0f / 3 },
+        { -0.25f, -2.0f / 3 },
+        { -0.25f,         0 },
+        { +0.75f,         0 },
+    };
+
+/// @brief 射影変換済みの座標をキューブの各面レンダリング位置へ移動させる。
+/// @param[in] pos 射影変換済みの座標。
+/// @param[in] face 面インデックス。
+/// @return 各面レンダリング位置へ移動させた座標。
+///
+/// 各面は下記のような配置でレンダリングされる。
+///
+/// |  |+Y|  |  |
+/// |-X|+Z|+X|-Z|
+/// |  |-Y|  |  |
+///
+/// まずスケーリングした後、目的の位置へ平行移動させる。
+float4 CalcEnvMapFacePosition(float4 pos, uniform int face)
+{
+    float4x4 trans =
+        float4x4(
+            float4(1, 0, 0, 0),
+            float4(0, 1, 0, 0),
+            float4(0, 0, 1, 0),
+            float4(EnvMapFaceTranslates[face], 0, 1));
+    return mul(mul(pos, EnvMapFaceScaleMatrix), trans);
+}
+
+/// @brief クリッピング判定 cos 値。
+///
+/// 正確には cos(45°) ≒ 0.70710678… だが、エッジ対策で少しだけ許容角度を取る。
+#define POSTIBL_ENVMAP_CLIP_COS 0.7068f
+
+/// @brief ピクセルシェーダに渡されたカメラの相対位置を基にクリッピング判定を行う。
+/// @param[in] eye ピクセルシェーダに渡されたカメラの相対位置。
+/// @param[in] face 面インデックス。
+void ClipEnvMapFace(float3 eye, uniform int face)
+{
+    // 対象面方向取得
+    float3 dir = EnvMapFaceDirections[face];
+
+    // X, Y, Z のうち 1 要素だけ 0 にするためのベクトルを作成
+    // +X 面や -X 面なら X 要素は 0 にしない
+    float3 ad = abs(dir);
+    float3 vdA = ad + ad.yzx;
+    float3 vdB = ad + ad.zxy;
+
+    // 対象面方向ともう1方向を軸とする2D平面へ投影した視線ベクトルと
+    // 対象面方向との角度が成す cos 値を算出して判定
+    clip(dot(dir, normalize(-eye * vdA)) - (POSTIBL_ENVMAP_CLIP_COS));
+    clip(dot(dir, normalize(-eye * vdB)) - (POSTIBL_ENVMAP_CLIP_COS));
+}
+
+/// 輪郭と地面影の頂点シェーダ出力構造体。
+struct EdgeShadowVSOutput
+{
+    float4 pos : POSITION;  ///< 射影変換座標。
+    float3 eye : TEXCOORD3; ///< カメラとの相対位置。
+};
+
+/// @brief テクニックで全キューブ面を描画するためのスクリプトマクロ。
+/// @param[in] baseName パスのベース名。
+#define POSTIBL_TEC_SCRIPT_DEF(baseName) \
+    "RenderColorTarget0=;" \
+    "RenderDepthStencilTarget=;" \
+    "Pass=" #baseName "0;" \
+    "Pass=" #baseName "1;" \
+    "Pass=" #baseName "2;" \
+    "Pass=" #baseName "3;" \
+    "Pass=" #baseName "4;" \
+    "Pass=" #baseName "5;"
+
+/// @brief オブジェクト描画テクニックの各キューブ面パスを定義するためのマクロ。
+/// @param[in] u_tex テクスチャ有効フラグ。
+/// @param[in] u_sph スフィアマップ有効フラグ。
+/// @param[in] u_toon トゥーン有効フラグ。
+/// @param[in] u_ss セルフシャドウ有効フラグ。
+/// @param[in] face 面インデックス。
+#define POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,u_ss,face) \
+    pass DrawObject##face { \
+        VertexShader = compile vs_3_0 Object_VS(u_tex, u_sph, u_toon, u_ss, face); \
+        PixelShader = compile ps_3_0 Object_PS(u_tex, u_sph, u_toon, u_ss, face); }
+
+/// @brief 非セルフシャドウオブジェクト描画テクニックを定義するためのマクロ。
+/// @param[in] u_tex テクスチャ有効フラグ。
+/// @param[in] u_sph スフィアマップ有効フラグ。
+/// @param[in] u_toon トゥーン有効フラグ。
+#define POSTIBL_OBJECT_TEC_DEF(u_tex,u_sph,u_toon) \
+    technique ObjectTec_##u_tex##u_sph##u_toon < \
+        string MMDPass = "object"; \
+        bool UseTexture = u_tex; \
+        bool UseSphereMap = u_sph; \
+        bool UseToon = u_toon; \
+        string Script = POSTIBL_TEC_SCRIPT_DEF(DrawObject); \
+    > { \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,false,0) \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,false,1) \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,false,2) \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,false,3) \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,false,4) \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,false,5) }
+
+/// @brief セルフシャドウオブジェクト描画テクニックを定義するためのマクロ。
+/// @param[in] u_tex テクスチャ有効フラグ。
+/// @param[in] u_sph スフィアマップ有効フラグ。
+/// @param[in] u_toon トゥーン有効フラグ。
+#define POSTIBL_OBJECT_SS_TEC_DEF(u_tex,u_sph,u_toon) \
+    technique ObjectSSTec_##u_tex##u_sph##u_toon < \
+        string MMDPass = "object_ss"; \
+        bool UseTexture = u_tex; \
+        bool UseSphereMap = u_sph; \
+        bool UseToon = u_toon; \
+        string Script = POSTIBL_TEC_SCRIPT_DEF(DrawObject); \
+    > { \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,true,0) \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,true,1) \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,true,2) \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,true,3) \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,true,4) \
+        POSTIBL_DRAWOBJECT_PASS_DEF(u_tex,u_sph,u_toon,true,5) }
+
+/// @brief 輪郭描画テクニックの各キューブ面パスを定義するためのマクロ。
+/// @param[in] face 面インデックス。
+#define POSTIBL_DRAWEDGE_PASS_DEF(face) \
+    pass DrawEdge##face { \
+        AlphaBlendEnable = false; \
+        AlphaTestEnable = false; \
+        VertexShader = compile vs_3_0 Edge_VS(face); \
+        PixelShader = compile ps_3_0 Edge_PS(face); }
+
+/// 輪郭描画テクニックを定義するためのマクロ。
+#define POSTIBL_EDGE_TEC_DEF \
+    technique EdgeTec < \
+        string MMDPass = "edge"; \
+        string Script = POSTIBL_TEC_SCRIPT_DEF(DrawEdge); \
+    > { \
+        POSTIBL_DRAWEDGE_PASS_DEF(0) \
+        POSTIBL_DRAWEDGE_PASS_DEF(1) \
+        POSTIBL_DRAWEDGE_PASS_DEF(2) \
+        POSTIBL_DRAWEDGE_PASS_DEF(3) \
+        POSTIBL_DRAWEDGE_PASS_DEF(4) \
+        POSTIBL_DRAWEDGE_PASS_DEF(5) }
+
+/// @brief 影描画テクニックの各キューブ面パスを定義するためのマクロ。
+/// @param[in] face 面インデックス。
+#define POSTIBL_DRAWSHADOW_PASS_DEF(face) \
+    pass DrawShadow##face { \
+        VertexShader = compile vs_3_0 Shadow_VS(face); \
+        PixelShader = compile ps_3_0 Shadow_PS(face); }
+
+/// 影描画テクニックを定義するためのマクロ。
+#define POSTIBL_SHADOW_TEC_DEF \
+    technique ShadowTec < \
+        string MMDPass = "shadow"; \
+        string Script = POSTIBL_TEC_SCRIPT_DEF(DrawShadow); \
+    > { \
+        POSTIBL_DRAWSHADOW_PASS_DEF(0) \
+        POSTIBL_DRAWSHADOW_PASS_DEF(1) \
+        POSTIBL_DRAWSHADOW_PASS_DEF(2) \
+        POSTIBL_DRAWSHADOW_PASS_DEF(3) \
+        POSTIBL_DRAWSHADOW_PASS_DEF(4) \
+        POSTIBL_DRAWSHADOW_PASS_DEF(5) }
