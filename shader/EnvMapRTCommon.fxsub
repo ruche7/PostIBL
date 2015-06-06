@@ -82,8 +82,8 @@ float4 CalcEnvMapFacePosition(float4 pos, uniform int face)
 
 /// @brief クリッピング判定 cos 値。
 ///
-/// 正確には cos(45°) ≒ 0.70710678… だが、エッジ対策で少しだけ許容角度を取る。
-#define POSTIBL_ENVMAP_CLIP_COS 0.7068f
+/// 正確には cos(45°) ≒ 0.70710678… だが、エッジ対策で多少広めに許容する。
+#define POSTIBL_ENVMAP_CLIP_COS 0.7f
 
 /// @brief ピクセルシェーダに渡されたカメラの相対位置を基にクリッピング判定を行う。
 /// @param[in] eye ピクセルシェーダに渡されたカメラの相対位置。

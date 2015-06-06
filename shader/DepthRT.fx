@@ -77,7 +77,7 @@ VSOutput RunVS(float4 pos : POSITION)
 /// ピクセルシェーダ処理を行う。
 float4 RunPS(float4 cpos : TEXCOORD0) : COLOR
 {
-    // 深度値を格納して返す
+    // 深度値を r に格納して返す
     float4 color = { 0, 0, 0, 1 };
     color.r = cpos.z / cpos.w;
     return color;
